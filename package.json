@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "api/analyze.js",
   "engines": {
-    "node": "14.x"
+    "node": "20.x"
   },
   "scripts": {
     "start": "node api/analyze.js",
