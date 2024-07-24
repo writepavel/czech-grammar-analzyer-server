@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analyzátor české gramatiky</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+        }
+        input, button, textarea {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #result {
+            white-space: pre-wrap;
+            background-color: #f8f8f8;
+            border: 1px solid #ddd;
+            padding: 10px;
+            border-radius: 4px;
+            min-height: 100px;
+        }
+        .error {
+            color: red;
+            font-weight: bold;
+        }
+        .loading {
+            color: #888;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Analyzátor české gramatiky</h1>
+        <input type="text" id="wordInput" placeholder="Zadejte české slovo">
+        <button onclick="analyzeWord()">Analyzovat</button>
+        <div id="result"></div>
+        <button onclick="copyToClipboard()">Kopírovat do schránky</button>
+    </div>
+
+    <script>
+        const SERVER_URL = '/api';
+
+        async function analyzeWord() {
+            const word = document.getElementById('wordInput').value.trim().toLowerCase();
+            if (!word) {
+                showError('Prosím, zadejte slovo');
+                return;
+            }
+
+            showLoading();
+
+            try {
+                const url = `${SERVER_URL}/analyze?word=${encodeURIComponent(word)}`;
+                console.log('Sending request to:', url);
+                const response = await fetch(url, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                });
+                
+                console.log('Response status:', response.status);
+                console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('Error response:', errorText);
+                    throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+                }
+
+                const data = await response.json();
+                console.log('Received data:', data);
+
+                if (!data.word || !data.priruckaData || !data.slovnikData) {
+                    throw new Error('Incomplete data received from server');
+                }
+
+                const czechWordGrammar = {
+                    word: data.word,
+                    priruckaData: data.priruckaData,
+                    slovnikData: data.slovnikData
+                };
+
+                czechWordGrammar.partOfSpeechFull = czechWordGrammar.slovnikData?.partOfSpeech || 'NOT_DEFINED';
+                czechWordGrammar.partOfSpeechType = determinePartOfSpeechType(czechWordGrammar.partOfSpeechFull);
+
+                if (czechWordGrammar.partOfSpeechType === 'Sloveso') {
+                    analyzeVerb(czechWordGrammar);
+                }
+
+                showResult(jsyaml.dump(czechWordGrammar));
+            } catch (error) {
+                console.error('Error during analysis:', error);
+                showError(`Chyba při analýze slova "${word}": ${error.message}`);
+            }
+        }
+
+        function showLoading() {
+            document.getElementById('result').innerHTML = '<p class="loading">Načítání...</p>';
+        }
+
+        function showResult(result) {
+            document.getElementById('result').innerHTML = `<pre>${result}</pre>`;
+        }
+
+        function showError(message) {
+            document.getElementById('result').innerHTML = `<p class="error">${message}</p>`;
+        }
+
+        function determinePartOfSpeechType(partOfSpeechFull) {
+            if (!partOfSpeechFull || partOfSpeechFull === 'NOT_DEFINED') {
+                return 'NOT_DEFINED';
+            }
+
+            const types = [
+                'Sloveso', 'Podstatné jméno', 'Přídavné jméno', 'Příslovce', 'Číslovka',
+                'Předložka', 'Zájmeno', 'Spojka', 'Částice', 'Citoslovce'
+            ];
+            const lowercaseFullType = partOfSpeechFull.toLowerCase();
+            for (const type of types) {
+                if (lowercaseFullType.includes(type.toLowerCase())) {
+                    return type;
+                }
+            }
+            return 'NOT_DEFINED';
+        }
+
+        function analyzeVerb(czechWordGrammar) {
+            const infinitive = czechWordGrammar.word;
+            czechWordGrammar.verbSuffixGroup = determineVerbSuffixGroup(infinitive);
+            
+            if (czechWordGrammar.priruckaData) {
+                czechWordGrammar.osoba2jednCislo = czechWordGrammar.priruckaData['2. osoba']?.[0] || 'NOT_DEFINED';
+                const conjugationInfo = determineVerbConjugation(czechWordGrammar.osoba2jednCislo);
+                czechWordGrammar.verbVzor = conjugationInfo.vzor;
+                czechWordGrammar.verbConjugationGroup = conjugationInfo.group;
+            } else {
+                czechWordGrammar.verbVzor = 'NO_GRAMMAR_TABLE';
+                czechWordGrammar.verbConjugationGroup = 'NO_GRAMMAR_TABLE';
+            }
+
+            czechWordGrammar.isIrregularVerb = determineIfIrregular(czechWordGrammar.verbSuffixGroup, czechWordGrammar.verbConjugationGroup);
+        }
+
+        function determineVerbSuffixGroup(infinitive) {
+            if (infinitive.endsWith('at')) return 1;
+            if (infinitive.endsWith('it') || infinitive.endsWith('et') || infinitive.endsWith('ět')) return 2;
+            if (infinitive.endsWith('ovat') || infinitive.endsWith('nout')) return 3;
+            return 'NOT_DEFINED';
+        }
+
+        function determineVerbConjugation(osoba2jednCislo) {
+            if (osoba2jednCislo.endsWith('áš')) return { vzor: 'Dělat', group: 1 };
+            if (osoba2jednCislo.endsWith('íš')) return { vzor: 'Mluvit', group: 2 };
+            if (osoba2jednCislo.endsWith('ješ')) return { vzor: 'Studovat', group: 3 };
+            return { vzor: 'NOT_DEFINED', group: 'NOT_DEFINED' };
+        }
+
+        function determineIfIrregular(suffixGroup, conjugationGroup) {
+            if (suffixGroup === 'NO_GRAMMAR_TABLE' || conjugationGroup === 'NOT_DEFINED') return 'NOT_DEFINED';
+            if (suffixGroup === conjugationGroup) return false;
+            return true;
+        }
+
+        function copyToClipboard() {
+            const resultElement = document.getElementById('result');
+            const range = document.createRange();
+            range.selectNode(resultElement);
+            window.getSelection().removeAllRanges();
+            window.getSelection().addRange(range);
+            document.execCommand('copy');
+            window.getSelection().removeAllRanges();
+            alert('Zkopírováno do schránky!');
+        }
+    </script>
+</body>
+</html>
