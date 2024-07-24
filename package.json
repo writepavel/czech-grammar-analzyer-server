@@ -1,8 +1,12 @@
 {
   "name": "czech-grammar-analyzer-server",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "api/analyze.js",
+  "engines": {
+    "node": "14.x"
+  },
   "scripts": {
+    "start": "node api/analyze.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
