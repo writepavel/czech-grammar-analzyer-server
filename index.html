@@ -23,6 +23,7 @@
         }
         h1 {
             color: #333;
+            text-align: center;
         }
         input, button, textarea {
             width: 100%;
@@ -30,12 +31,14 @@
             margin-bottom: 10px;
             border: 1px solid #ddd;
             border-radius: 4px;
+            box-sizing: border-box;
         }
         button {
             background-color: #4CAF50;
             color: white;
             border: none;
             cursor: pointer;
+            transition: background-color 0.3s;
         }
         button:hover {
             background-color: #45a049;
@@ -47,6 +50,8 @@
             padding: 10px;
             border-radius: 4px;
             min-height: 100px;
+            max-height: 400px;
+            overflow-y: auto;
         }
         .error {
             color: red;
@@ -90,7 +95,6 @@
                 });
                 
                 console.log('Response status:', response.status);
-                console.log('Response headers:', Object.fromEntries(response.headers.entries()));
 
                 if (!response.ok) {
                     const errorText = await response.text();
@@ -101,28 +105,42 @@
                 const data = await response.json();
                 console.log('Received data:', data);
 
-                if (!data.word || !data.priruckaData || !data.slovnikData) {
-                    throw new Error('Incomplete data received from server');
-                }
-
-                const czechWordGrammar = {
-                    word: data.word,
-                    priruckaData: data.priruckaData,
-                    slovnikData: data.slovnikData
-                };
-
-                czechWordGrammar.partOfSpeechFull = czechWordGrammar.slovnikData?.partOfSpeech || 'NOT_DEFINED';
-                czechWordGrammar.partOfSpeechType = determinePartOfSpeechType(czechWordGrammar.partOfSpeechFull);
-
-                if (czechWordGrammar.partOfSpeechType === 'Sloveso') {
-                    analyzeVerb(czechWordGrammar);
-                }
-
-                showResult(jsyaml.dump(czechWordGrammar));
+                showResult(formatResult(data));
             } catch (error) {
                 console.error('Error during analysis:', error);
                 showError(`Chyba při analýze slova "${word}": ${error.message}`);
             }
+        }
+
+        function formatResult(data) {
+            let result = `Slovo: ${data.word}\n`;
+            result += `Část řeči: ${data.partOfSpeechFull}\n`;
+            result += `Typ části řeči: ${data.partOfSpeechType}\n\n`;
+
+            if (data.partOfSpeechType === 'Podstatné jméno') {
+                result += `Rod: ${data.nounRodFull}\n`;
+                result += `Rod (zkráceně): ${data.nounRod}\n`;
+                result += `Vzor: ${data.nounVzor}\n\n`;
+                result += `Nominativ jednotné číslo: ${data.nominativ_single}\n`;
+                result += `Nominativ množné číslo: ${data.nominativ_plural}\n`;
+                result += `Genitiv jednotné číslo: ${data.genitiv_single}\n`;
+                result += `Akuzativ množné číslo: ${data.akuzativ_plural}\n`;
+            } else if (data.partOfSpeechType === 'Sloveso') {
+                result += `Vzor slovesa: ${data.verbVzor}\n`;
+                result += `Skupina přípon: ${data.verbSuffixGroup}\n`;
+                result += `Skupina časování: ${data.verbConjugationGroup}\n`;
+                result += `Nepravidelné sloveso: ${data.isIrregularVerb}\n`;
+                if (data.osoba2jednCislo) {
+                    result += `2. osoba jednotného čísla: ${data.osoba2jednCislo}\n`;
+                }
+            }
+
+            if (data.priruckaData) {
+                result += '\nGramatická tabulka:\n';
+                result += jsyaml.dump(data.priruckaData);
+            }
+
+            return result;
         }
 
         function showLoading() {
@@ -137,61 +155,6 @@
             document.getElementById('result').innerHTML = `<p class="error">${message}</p>`;
         }
 
-        function determinePartOfSpeechType(partOfSpeechFull) {
-            if (!partOfSpeechFull || partOfSpeechFull === 'NOT_DEFINED') {
-                return 'NOT_DEFINED';
-            }
-
-            const types = [
-                'Sloveso', 'Podstatné jméno', 'Přídavné jméno', 'Příslovce', 'Číslovka',
-                'Předložka', 'Zájmeno', 'Spojka', 'Částice', 'Citoslovce'
-            ];
-            const lowercaseFullType = partOfSpeechFull.toLowerCase();
-            for (const type of types) {
-                if (lowercaseFullType.includes(type.toLowerCase())) {
-                    return type;
-                }
-            }
-            return 'NOT_DEFINED';
-        }
-
-        function analyzeVerb(czechWordGrammar) {
-            const infinitive = czechWordGrammar.word;
-            czechWordGrammar.verbSuffixGroup = determineVerbSuffixGroup(infinitive);
-            
-            if (czechWordGrammar.priruckaData) {
-                czechWordGrammar.osoba2jednCislo = czechWordGrammar.priruckaData['2. osoba']?.[0] || 'NOT_DEFINED';
-                const conjugationInfo = determineVerbConjugation(czechWordGrammar.osoba2jednCislo);
-                czechWordGrammar.verbVzor = conjugationInfo.vzor;
-                czechWordGrammar.verbConjugationGroup = conjugationInfo.group;
-            } else {
-                czechWordGrammar.verbVzor = 'NO_GRAMMAR_TABLE';
-                czechWordGrammar.verbConjugationGroup = 'NO_GRAMMAR_TABLE';
-            }
-
-            czechWordGrammar.isIrregularVerb = determineIfIrregular(czechWordGrammar.verbSuffixGroup, czechWordGrammar.verbConjugationGroup);
-        }
-
-        function determineVerbSuffixGroup(infinitive) {
-            if (infinitive.endsWith('at')) return 1;
-            if (infinitive.endsWith('it') || infinitive.endsWith('et') || infinitive.endsWith('ět')) return 2;
-            if (infinitive.endsWith('ovat') || infinitive.endsWith('nout')) return 3;
-            return 'NOT_DEFINED';
-        }
-
-        function determineVerbConjugation(osoba2jednCislo) {
-            if (osoba2jednCislo.endsWith('áš')) return { vzor: 'Dělat', group: 1 };
-            if (osoba2jednCislo.endsWith('íš')) return { vzor: 'Mluvit', group: 2 };
-            if (osoba2jednCislo.endsWith('ješ')) return { vzor: 'Studovat', group: 3 };
-            return { vzor: 'NOT_DEFINED', group: 'NOT_DEFINED' };
-        }
-
-        function determineIfIrregular(suffixGroup, conjugationGroup) {
-            if (suffixGroup === 'NO_GRAMMAR_TABLE' || conjugationGroup === 'NOT_DEFINED') return 'NOT_DEFINED';
-            if (suffixGroup === conjugationGroup) return false;
-            return true;
-        }
-
         function copyToClipboard() {
             const resultElement = document.getElementById('result');
             const range = document.createRange();
@@ -202,6 +165,14 @@
             window.getSelection().removeAllRanges();
             alert('Zkopírováno do schránky!');
         }
+
+        // Добавляем обработчик события для кнопки Enter
+        document.getElementById('wordInput').addEventListener('keypress', function(event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                analyzeWord();
+            }
+        });
     </script>
 </body>
 </html>
