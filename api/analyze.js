@@ -254,7 +254,7 @@ module.exports = async (req, res) => {
             const slovnikData = await fetchSlovnikData(word);
             let partOfSpeechType = determinePartOfSpeechType(slovnikData?.partOfSpeech);
             const priruckaData = await fetchPriruckaData(word, partOfSpeechType);
-            if (partOfSpeechType === "NOT_DEFINED" && priruckaData?.table?.['2. osoba']) {
+            if (slovnikData?.partOfSpeech === null && priruckaData?.table?.['2. osoba'] != null) {
                 partOfSpeechType = 'Sloveso';
             }            
             
