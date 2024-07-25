@@ -252,9 +252,11 @@ module.exports = async (req, res) => {
 
         try {
             const slovnikData = await fetchSlovnikData(word);
-            const partOfSpeechType = determinePartOfSpeechType(slovnikData?.partOfSpeech);
+            let partOfSpeechType = determinePartOfSpeechType(slovnikData?.partOfSpeech);
             const priruckaData = await fetchPriruckaData(word, partOfSpeechType);
-            
+            if (!!partOfSpeechType && priruckaData?.table?.['2. osoba']) {
+                partOfSpeechType = 'Sloveso';
+            }            
             
             let czechWordGrammar = {
                 word: word,
