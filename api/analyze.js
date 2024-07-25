@@ -39,31 +39,31 @@ async function fetchWithRetry(url, config, retries = 3, backoffFactor = 1.5) {
     }
 }
 
-
 async function fetchPriruckaData(word) {
-    const url = `https://prirucka.ujc.cas.cz/?slovo=${encodeURIComponent(word)}`;
-    
+    const url = `https://prirucka.ujc.cas.cz/?id=${encodeURIComponent(word)}`;
+
     const config = {
         headers: {
             'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)],
         },
-        timeout: 10000, // 10 seconds timeout
+        timeout: 30000, // 30 seconds timeout
     };
 
-    try {
-        const response = await fetchWithRetry(url, config);
-        const $ = cheerio.load(response.data);
-        const table = $('#content > div:nth-child(2) > table');
-        const nounRodFull = $('#content > div:nth-child(2) > p:nth-child(3)').text().trim();
+    const response = await axios.get(url, config);
 
-        return { 
-            table: table.length ? parseTable($, table) : null,
-            nounRodFull: nounRodFull
-        };
-    } catch (error) {
-        console.error(`Error fetching data for word "${word}":`, error.message);
-        return null;
+    if (response.data.includes("Some other request from your IP address")) {
+        console.log("WARNING: Detected 'Some other request from your IP address' in the response.");
+        return {error: "WARNING: Detected 'Some other request from your IP address' in the response."};
     }
+
+    const $ = cheerio.load(response.data);
+    const table = $('#content > div:nth-child(2) > table');
+    const nounRodFull = $('#content > div:nth-child(2) > p:nth-child(3)').text().trim();
+
+    return {
+        table: table.length ? parseTable($, table) : null,
+        nounRodFull: nounRodFull
+    };
 }
 
 function parseTable($, table) {
@@ -83,10 +83,32 @@ function parseTable($, table) {
 
 async function fetchSlovnikData(word) {
     const url = `https://slovnik.seznam.cz/preklad/cesky_anglicky/${encodeURIComponent(word)}`;
-    const response = await axios.get(url);
-    const $ = cheerio.load(response.data);
-    const partOfSpeech = $('.Box--partOfSpeech header h2 span').text().trim();
-    return { partOfSpeech };
+    
+    try {
+        const response = await axios.get(url, {
+            validateStatus: function (status) {
+                return status >= 200 && status < 500; // Принимаем любой статус, кроме 5xx ошибок
+            },
+        });
+
+        if (response.status === 404) {
+            console.log(`Word "${word}" not found in Slovnik.`);
+            return { partOfSpeech: null, error: 'Word not found' };
+        }
+
+        if (response.status !== 200) {
+            console.log(`Unexpected status code ${response.status} for word "${word}"`);
+            return { partOfSpeech: null, error: `Unexpected status: ${response.status}` };
+        }
+
+        const $ = cheerio.load(response.data);
+        const partOfSpeech = $('.Box--partOfSpeech header h2 span').text().trim();
+        
+        return { partOfSpeech: partOfSpeech || null };
+    } catch (error) {
+        console.error(`Error fetching data for word "${word}":`, error.message);
+        return { partOfSpeech: null, error: error.message };
+    }
 }
 
 function determineNounRod(nounRodFull) {
@@ -166,16 +188,20 @@ function determinePartOfSpeechType(partOfSpeechFull) {
 }
 
 function determineVerbSuffixGroup(infinitive) {
-    if (infinitive.endsWith('ovat') || infinitive.endsWith('nout')) return 3;
-    if (infinitive.endsWith('at')) return 1;
-    if (infinitive.endsWith('it') || infinitive.endsWith('et') || infinitive.endsWith('ět')) return 2;
+    const infinitiveCore = infinitive.split(' ')[0]; // to exclude particles se and si from the analysis
+
+    if (infinitiveCore.endsWith('ovat') || infinitive.endsWith('nout')) return 3;
+    if (infinitiveCore.endsWith('at')) return 1;
+    if (infinitiveCore.endsWith('it') || infinitive.endsWith('et') || infinitive.endsWith('ět')) return 2;
     return 'NOT_DEFINED';
 }
 
 function determineVerbConjugation(osoba2jednCislo) {
-    if (osoba2jednCislo.endsWith('áš')) return { vzor: 'Dělat', group: 1 };
-    if (osoba2jednCislo.endsWith('íš')) return { vzor: 'Mluvit', group: 2 };
-    if (osoba2jednCislo.endsWith('ješ')) return { vzor: 'Studovat', group: 3 };
+    const osoba2jednCisloCore = osoba2jednCislo.split(' ')[0]; // to exclude particles se and si from the analysis
+
+    if (osoba2jednCisloCore.endsWith('áš')) return { vzor: 'Dělat', group: 1 };
+    if (osoba2jednCisloCore.endsWith('íš')) return { vzor: 'Mluvit', group: 2 };
+    if (osoba2jednCisloCore.endsWith('ješ')) return { vzor: 'Studovat', group: 3 };
     return { vzor: 'NOT_DEFINED', group: 'NOT_DEFINED' };
 }
 
@@ -247,7 +273,7 @@ module.exports = async (req, res) => {
                 czechWordGrammar.isIrregularVerb = determineIfIrregular(czechWordGrammar.verbSuffixGroup, czechWordGrammar.verbConjugationGroup);
             }
 
-            console.log('Analysis complete');
+            console.log(`Analysis of word "${word}" is complete. Result is `, czechWordGrammar);
             return res.status(200).json(czechWordGrammar);
         } catch (error) {
             console.error('Error during analysis:', error);
