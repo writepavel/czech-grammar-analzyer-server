@@ -61,7 +61,14 @@ async function fetchPriruckaData(sourceWord) {
 
     const $ = cheerio.load(response.data);
     const table = $('#content > div:nth-child(2) > table');
-    const nounRodFull = $('#content > div:nth-child(2) > p:nth-child(3)').text().trim();
+    const nounRodVariant1 = $('#content > div:nth-child(2) > p:nth-child(3)').text().trim();
+    const nounRodVariant2 = $('#content > div:nth-child(2) > p:nth-child(4)').text().trim();
+    let nounRodFull;
+    if (nounRodVariant1.toLowerCase().startsWith('rod:')) {
+        nounRodFull = nounRodVariant1;
+    } else {
+        nounRodFull = nounRodVariant2;
+    }
 
     return {
         table: table.length ? parseTable($, table) : null,
@@ -159,6 +166,7 @@ function determineNounVzor(nounRod, forms) {
             if (genitiv_single.endsWith("u") && akuzativ_plural.endsWith("y")) return "Hrad";
             if (genitiv_single.endsWith("e") && akuzativ_plural.endsWith("e")) return "Stroj";
             if (genitiv_single.endsWith("e") && akuzativ_plural.endsWith("y")) return "Kamen";
+            if (genitiv_single.endsWith("a") && akuzativ_plural.endsWith("y")) return "Les";
             return "NOT_DEFINED";
         case "ženský":
             if (nominativ_single.endsWith("a")) return "Žena";
