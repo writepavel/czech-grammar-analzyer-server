@@ -39,8 +39,9 @@ async function fetchWithRetry(url, config, retries = 3, backoffFactor = 1.5) {
     }
 }
 
-async function fetchPriruckaData(word) {
-    const url = `https://prirucka.ujc.cas.cz/?id=${encodeURIComponent(word)}`;
+async function fetchPriruckaData(sourceWord) {
+    const word = sourceWord.split(' ')[0]; // in case of particles se/si etc.
+    const url = `https://prirucka.ujc.cas.cz/?slovo=${encodeURIComponent(word)}`;
 
     const config = {
         headers: {
@@ -53,7 +54,9 @@ async function fetchPriruckaData(word) {
 
     if (response.data.includes("Some other request from your IP address")) {
         console.log("WARNING: Detected 'Some other request from your IP address' in the response.");
-        return {error: "WARNING: Detected 'Some other request from your IP address' in the response."};
+        return {error: "WARNING: Detected 'Some other request from your IP address' in the response.",
+            table: "WARNING: Detected 'Some other request from your IP address' in the response."
+        };
     }
 
     const $ = cheerio.load(response.data);
@@ -112,10 +115,10 @@ async function fetchSlovnikData(word) {
 }
 
 function determineNounRod(nounRodFull) {
-    if (nounRodFull.includes("m. neživ.")) return "mužský_neživ";
-    if (nounRodFull.includes("m. živ.")) return "mužský_živ";
-    if (nounRodFull.includes("s.")) return "střední";
-    if (nounRodFull.includes("ž.")) return "ženský";
+    if (nounRodFull?.includes("m. neživ.")) return "mužský_neživ";
+    if (nounRodFull?.includes("m. živ.")) return "mužský_živ";
+    if (nounRodFull?.includes("s.")) return "střední";
+    if (nounRodFull?.includes("ž.")) return "ženský";
     return "NOT_DEFINED";
 }
 
@@ -240,8 +243,10 @@ module.exports = async (req, res) => {
         console.log('Analyzing word:', word);
 
         try {
-            const priruckaData = await fetchPriruckaData(word);
             const slovnikData = await fetchSlovnikData(word);
+            const partOfSpeechType = determinePartOfSpeechType(slovnikData?.partOfSpeech);
+            const priruckaData = await fetchPriruckaData(word, partOfSpeechType);
+            
             
             let czechWordGrammar = {
                 word: word,
