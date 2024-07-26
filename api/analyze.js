@@ -226,8 +226,12 @@ module.exports = async (req, res) => {
     console.log('Received request:', req.method, req.url);
 
     // Настройка CORS
+    const allowedOrigins = ['app://obsidian.md', 'http://localhost:3000']; // Добавьте сюда все разрешенные origins
+    const origin = req.headers.origin;
+    if (allowedOrigins.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+    }
     res.setHeader('Access-Control-Allow-Credentials', true);
-    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
     res.setHeader(
         'Access-Control-Allow-Headers',
@@ -236,8 +240,7 @@ module.exports = async (req, res) => {
 
     // Обработка предварительных запросов OPTIONS
     if (req.method === 'OPTIONS') {
-        res.status(200).end();
-        return;
+        return res.status(200).end();
     }
 
     // Обработка GET запросов
@@ -254,6 +257,9 @@ module.exports = async (req, res) => {
             const slovnikData = await fetchSlovnikData(word);
             let partOfSpeechType = determinePartOfSpeechType(slovnikData?.partOfSpeech);
             const priruckaData = await fetchPriruckaData(word, partOfSpeechType);
+            console.log("analyzing word " + word + " slovnikData = ", slovnikData);
+            console.log("analyzing word " + word + " priruckaData = ", priruckaData);
+            
             if (slovnikData?.partOfSpeech === null && priruckaData?.table?.['2. osoba'] != null) {
                 partOfSpeechType = 'Sloveso';
             }            
@@ -263,29 +269,13 @@ module.exports = async (req, res) => {
                 priruckaData: priruckaData.table,
                 slovnikData: slovnikData,
                 partOfSpeechFull: slovnikData.partOfSpeech,
-                partOfSpeechType: determinePartOfSpeechType(slovnikData.partOfSpeech)
+                partOfSpeechType: partOfSpeechType
             };
 
             if (czechWordGrammar.partOfSpeechType === 'Podstatné jméno') {
-                czechWordGrammar.nounRodFull = priruckaData.nounRodFull;
-                czechWordGrammar.nounRod = determineNounRod(priruckaData.nounRodFull);
-                const nounForms = getNounForms(priruckaData);
-                czechWordGrammar = { ...czechWordGrammar, ...nounForms };
-                czechWordGrammar.nounVzor = determineNounVzor(czechWordGrammar.nounRod, nounForms);
+                czechWordGrammar = await analyzeNoun(czechWordGrammar, priruckaData);
             } else if (czechWordGrammar.partOfSpeechType === 'Sloveso') {
-                czechWordGrammar.verbSuffixGroup = determineVerbSuffixGroup(word);
-                
-                if (czechWordGrammar.priruckaData) {
-                    czechWordGrammar.osoba2jednCislo = czechWordGrammar.priruckaData['2. osoba']?.[0] || 'NOT_DEFINED';
-                    const conjugationInfo = determineVerbConjugation(czechWordGrammar.osoba2jednCislo);
-                    czechWordGrammar.verbVzor = conjugationInfo.vzor;
-                    czechWordGrammar.verbConjugationGroup = conjugationInfo.group;
-                } else {
-                    czechWordGrammar.verbVzor = 'NO_GRAMMAR_TABLE';
-                    czechWordGrammar.verbConjugationGroup = 'NO_GRAMMAR_TABLE';
-                }
-
-                czechWordGrammar.isIrregularVerb = determineIfIrregular(czechWordGrammar.verbSuffixGroup, czechWordGrammar.verbConjugationGroup);
+                czechWordGrammar = await analyzeVerb(czechWordGrammar, word);
             }
 
             console.log(`Analysis of word "${word}" is complete. Result is `, czechWordGrammar);
@@ -299,3 +289,29 @@ module.exports = async (req, res) => {
     // Если метод запроса не GET или OPTIONS
     return res.status(405).json({ error: 'Method Not Allowed' });
 };
+
+async function analyzeNoun(czechWordGrammar, priruckaData) {
+    czechWordGrammar.nounRodFull = priruckaData.nounRodFull;
+    czechWordGrammar.nounRod = determineNounRod(priruckaData.nounRodFull);
+    const nounForms = getNounForms(priruckaData);
+    czechWordGrammar = { ...czechWordGrammar, ...nounForms };
+    czechWordGrammar.nounVzor = determineNounVzor(czechWordGrammar.nounRod, nounForms);
+    return czechWordGrammar;
+}
+
+async function analyzeVerb(czechWordGrammar, word) {
+    czechWordGrammar.verbSuffixGroup = determineVerbSuffixGroup(word);
+    
+    if (czechWordGrammar.priruckaData) {
+        czechWordGrammar.osoba2jednCislo = czechWordGrammar.priruckaData['2. osoba']?.[0] || 'NOT_DEFINED';
+        const conjugationInfo = determineVerbConjugation(czechWordGrammar.osoba2jednCislo);
+        czechWordGrammar.verbVzor = conjugationInfo.vzor;
+        czechWordGrammar.verbConjugationGroup = conjugationInfo.group;
+    } else {
+        czechWordGrammar.verbVzor = 'NO_GRAMMAR_TABLE';
+        czechWordGrammar.verbConjugationGroup = 'NO_GRAMMAR_TABLE';
+    }
+
+    czechWordGrammar.isIrregularVerb = determineIfIrregular(czechWordGrammar.verbSuffixGroup, czechWordGrammar.verbConjugationGroup);
+    return czechWordGrammar;
+}
